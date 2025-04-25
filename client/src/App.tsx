@@ -9,6 +9,9 @@ import {
 } from "./services/auth";
 import { updateUserProfile } from "./services/profile";
 import { ChatPage } from "./components/ChatPage";
+// Import ToastContainer and CSS
+import { ToastContainer } from 'react-toastify';
+import 'react-toastify/dist/ReactToastify.css';
 
 interface AuthPageProps {
   onAuthSuccess: (method: string, value: string) => void;
@@ -636,26 +639,37 @@ function App() {
     setPage("profile");
   };
 
-  if (page === "auth") {
-    return <AuthPage onAuthSuccess={handleAuthSuccess} setPage={setPage} />;
-  }
-  if (page === "verify") {
-    return (
-      <VerificationPage
-        authMethod={authMethod}
-        authValue={authValue}
-        onVerifySuccess={handleVerifySuccess}
+  return (
+    <>
+      <ToastContainer 
+        position="top-right"
+        autoClose={5000}
+        hideProgressBar={false}
+        newestOnTop
+        closeOnClick
+        rtl={false}
+        pauseOnFocusLoss
+        draggable
+        pauseOnHover
+        theme="dark" // Using dark theme to match your app's styling
       />
-    );
-  }
-  if (page === "profile") {
-    return <ProfilePage setPage={setPage} />;
-  }
-  if (page === "main") {
-    return <ChatPage />;
-  }
-
-  return null;
+      
+      {page === "auth" ? (
+        <AuthPage onAuthSuccess={handleAuthSuccess} setPage={setPage} />
+      ) : page === "verify" ? (
+        <VerificationPage
+          authMethod={authMethod}
+          authValue={authValue}
+          onVerifySuccess={handleVerifySuccess}
+        />
+      ) : page === "profile" ? (
+        <ProfilePage setPage={setPage} />
+      ) : page === "main" ? (
+        <ChatPage />
+      ) : null}
+    </>
+  );
 }
+
 
 export default App;
