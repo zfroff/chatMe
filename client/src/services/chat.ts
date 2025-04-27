@@ -50,7 +50,11 @@ interface ClientToServerEvents {
   ) => void;
   get_messages: (
     data: { conversationId: string },
-    callback: (response: { success: boolean; data?: Message[]; error?: string }) => void
+    callback: (response: {
+      success: boolean;
+      data?: Message[];
+      error?: string;
+    }) => void
   ) => void;
 }
 
@@ -76,11 +80,17 @@ class ChatService {
     this.initializeSocket();
   }
 
-  public sendMessage(conversationId: string, text: string, retryCount = 3): Promise<void> {
+  public sendMessage(
+    conversationId: string,
+    text: string,
+    retryCount = 3
+  ): Promise<void> {
     return new Promise((resolve, reject) => {
       if (!this.socket.connected) {
         if (retryCount > 0) {
-          console.log(`Socket not connected. Retrying... (${retryCount} attempts left)`);
+          console.log(
+            `Socket not connected. Retrying... (${retryCount} attempts left)`
+          );
           // Wait a bit and retry
           setTimeout(() => {
             this.sendMessage(conversationId, text, retryCount - 1)
@@ -119,11 +129,13 @@ class ChatService {
 
   private processMessageQueue(): void {
     if (this.messageQueue.length > 0 && this.socket.connected) {
-      console.log(`Processing message queue (${this.messageQueue.length} messages)`);
-      
+      console.log(
+        `Processing message queue (${this.messageQueue.length} messages)`
+      );
+
       // Process up to 5 messages at a time to avoid flooding
       const messagesToProcess = this.messageQueue.splice(0, 5);
-      
+
       messagesToProcess.forEach(({ conversationId, text }) => {
         this.socket.emit(
           "send_message",
@@ -159,7 +171,7 @@ class ChatService {
 
     this.socket.on("disconnect", (reason: string) => {
       console.log(`Disconnected: ${reason}`);
-      
+
       // If the server disconnected us, try to reconnect
       if (reason === "io server disconnect") {
         this.socket.connect();
@@ -176,7 +188,9 @@ class ChatService {
     });
 
     this.socket.on("reconnect_failed", () => {
-      console.error("Failed to reconnect to chat server after maximum attempts");
+      console.error(
+        "Failed to reconnect to chat server after maximum attempts"
+      );
       // You could notify the user here that they need to refresh the page
     });
   }
@@ -262,7 +276,7 @@ class ChatService {
   public isConnected(): boolean {
     return this.socket.connected;
   }
-  
+
   public reconnect(): void {
     if (!this.socket.connected) {
       this.socket.connect();
