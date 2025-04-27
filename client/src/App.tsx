@@ -122,7 +122,7 @@ function AuthPage({ onAuthSuccess, setPage }: AuthPageProps) {
       <div className="relative w-full max-h-screen flex items-center justify-center px-4 py-8 z-10">
         <div className="bg-zinc-900/90 rounded-3xl shadow-2xl p-6 sm:p-8 w-full max-w-[95vw] sm:max-w-lg md:max-w-xl lg:max-w-2xl xl:max-w-3xl animate-fade-in backdrop-blur-md border border-orange-900/30">
           <h1 className="text-4xl md:text-5xl font-extrabold mb-8 text-center tracking-tight animate-slide-down bg-gradient-to-r from-orange-400 via-rose-300 to-purple-400 bg-clip-text text-transparent drop-shadow-lg">
-            Welcome to Chat App
+            Welcome to chatME
           </h1>
           <div className="flex justify-center gap-4 mb-8">
             <button
