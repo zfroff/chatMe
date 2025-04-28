@@ -44,16 +44,16 @@ export const updateUserProfile = async (
   try {
     if (!auth.currentUser) throw new Error("No authenticated user");
 
-    let photoURL = auth.currentUser.photoURL;
-
-    if (photoFile) {
-      photoURL = await uploadProfilePicture(photoFile);
-    }
-
     // First check if nickname is available
     const isNicknameAvailable = await checkNickname(nickname);
     if (!isNicknameAvailable) {
       throw new Error('Nickname is already taken');
+    }
+
+    let photoURL = auth.currentUser.photoURL;
+
+    if (photoFile) {
+      photoURL = await uploadProfilePicture(photoFile);
     }
 
     // Update profile

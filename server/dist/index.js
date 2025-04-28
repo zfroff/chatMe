@@ -11,7 +11,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // Initialize Firebase Admin with explicit path to credentials
 initializeApp({
     credential: applicationDefault(),
-    projectId: "message-me-265b0",
+    projectId: "chatme-webapp",
 });
 const app = express();
 const httpServer = createServer(app);

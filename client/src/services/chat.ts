@@ -72,8 +72,10 @@ class ChatService {
       reconnectionDelay: 1000,
       reconnectionDelayMax: 5000,
       timeout: 20000,
+      forceNew: true,
+      transports: ['polling', 'websocket'], // Try polling first, then websocket
       auth: {
-        token: () => localStorage.getItem("token"),
+        token: localStorage.getItem("token") || "",
       },
     });
 
