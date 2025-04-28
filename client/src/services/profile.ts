@@ -18,8 +18,27 @@ export const uploadProfilePicture = async (file: File) => {
   return await getDownloadURL(snapshot.ref);
 };
 
+export const checkNickname = async (nickname: string) => {
+  try {
+    const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/api/check-nickname`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ nickname }),
+    });
+
+    const data = await response.json();
+    return data.success;
+  } catch (error) {
+    console.error('Error checking nickname:', error);
+    throw error;
+  }
+};
+
 export const updateUserProfile = async (
   displayName: string,
+  nickname: string,
   photoFile?: File
 ) => {
   try {
@@ -31,14 +50,40 @@ export const updateUserProfile = async (
       photoURL = await uploadProfilePicture(photoFile);
     }
 
+    // First check if nickname is available
+    const isNicknameAvailable = await checkNickname(nickname);
+    if (!isNicknameAvailable) {
+      throw new Error('Nickname is already taken');
+    }
+
     // Update profile
     await updateProfile(auth.currentUser, {
       displayName,
       photoURL,
     });
 
+    // Update nickname in the backend
+    const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/api/update-profile`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${await auth.currentUser.getIdToken()}`,
+      },
+      body: JSON.stringify({
+        nickname,
+        displayName,
+        photoURL,
+      }),
+    });
+
+    const data = await response.json();
+    if (!data.success) {
+      throw new Error(data.error || 'Failed to update profile');
+    }
+
     return {
       displayName,
+      nickname,
       photoURL,
     };
   } catch (error) {

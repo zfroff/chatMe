@@ -464,6 +464,7 @@ interface ProfilePageProps {
 
 function ProfilePage({ setPage }: ProfilePageProps) {
   const [displayName, setDisplayName] = useState("");
+  const [nickname, setNickname] = useState("");
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string>("");
   const [isLoading, setIsLoading] = useState(false);
@@ -489,11 +490,23 @@ function ProfilePage({ setPage }: ProfilePageProps) {
       return;
     }
 
+    if (!nickname.trim()) {
+      setError("Please enter a nickname");
+      return;
+    }
+
+    // Validate nickname format
+    const nicknameRegex = /^[a-z0-9._]+$/;
+    if (!nicknameRegex.test(nickname)) {
+      setError("Nickname can only contain lowercase letters, numbers, underscore (_) and period (.)");
+      return;
+    }
+
     setIsLoading(true);
     setError("");
 
     try {
-      await updateUserProfile(displayName.trim(), photoFile || undefined);
+      await updateUserProfile(displayName.trim(), nickname.trim(), photoFile || undefined);
       setPage("main");
     } catch (error) {
       console.error("Profile update error:", error);
@@ -558,6 +571,27 @@ function ProfilePage({ setPage }: ProfilePageProps) {
               <div className="text-sm text-zinc-400">
                 Click to upload profile picture
               </div>
+            </div>
+
+            <div className="space-y-2">
+              <label
+                htmlFor="nickname"
+                className="block text-sm font-medium text-zinc-300"
+              >
+                Nickname (for user discovery)
+              </label>
+              <input
+                id="nickname"
+                type="text"
+                value={nickname}
+                onChange={(e) => setNickname(e.target.value.toLowerCase())}
+                className="w-full px-4 py-3 rounded-xl bg-zinc-800 border border-zinc-700 focus:outline-none focus:ring-2 focus:ring-orange-500/50 text-lg transition-all duration-300 shadow-inner hover:border-orange-400/30"
+                placeholder="Enter your unique nickname"
+                required
+              />
+              <p className="text-xs text-zinc-400">
+                Can contain lowercase letters, numbers, underscore (_) and period (.)
+              </p>
             </div>
 
             <div className="space-y-2">

@@ -13,7 +13,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // Initialize Firebase Admin with explicit path to credentials
 initializeApp({
   credential: applicationDefault(),
-  projectId: "message-me-265b0",
+  projectId: "chatme-webapp",
 });
 
 const app = express();
@@ -169,4 +169,162 @@ io.on("connection", (socket) => {
 const PORT = process.env.PORT || 3000;
 httpServer.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+});
+
+
+// Add these interfaces after the imports
+interface User {
+  uid: string;
+  nickname: string;
+  displayName: string;
+  photoURL?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+// Add after the db initialization
+// Remove the createIndex line and add proper interfaces
+interface User {
+  uid: string;
+  nickname: string;
+  displayName: string;
+  photoURL?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+// Add these new endpoints before the Socket.IO middleware
+app.post('/api/check-nickname', async (req, res) => {
+  try {
+    const { nickname } = req.body;
+    
+    // Validate nickname format
+    const nicknameRegex = /^[a-z0-9._]+$/;
+    if (!nicknameRegex.test(nickname)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Nickname can only contain lowercase letters, numbers, underscore (_) and period (.)'
+      });
+    }
+
+    // Check if nickname exists using a transaction to ensure consistency
+    const userDoc = await db.collection('users')
+      .where('nickname', '==', nickname)
+      .get();
+
+    res.json({ 
+      success: true, 
+      available: userDoc.empty 
+    });
+  } catch (error) {
+    console.error('Error checking nickname:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Failed to check nickname availability' 
+    });
+  }
+});
+
+app.post('/api/users', async (req, res) => {
+  try {
+    const token = req.headers.authorization?.split('Bearer ')[1];
+    if (!token) {
+      return res.status(401).json({ 
+        success: false, 
+        error: 'No token provided' 
+      });
+    }
+
+    const decodedToken = await getAuth().verifyIdToken(token);
+    const { nickname, displayName, photoURL } = req.body;
+
+    // Validate nickname format
+    const nicknameRegex = /^[a-z0-9._]+$/;
+    if (!nicknameRegex.test(nickname)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Nickname can only contain lowercase letters, numbers, underscore (_) and period (.)'
+      });
+    }
+
+    // Check if nickname exists
+    const existingUser = await db.collection('users')
+      .where('nickname', '==', nickname)
+      .get();
+
+    if (!existingUser.empty) {
+      return res.status(400).json({
+        success: false,
+        error: 'Nickname already taken'
+      });
+    }
+
+    // Create user document
+    const user: User = {
+      uid: decodedToken.uid,
+      nickname,
+      displayName,
+      photoURL,
+      createdAt: Date.now(),
+      updatedAt: Date.now()
+    };
+
+    await db.collection('users').doc(decodedToken.uid).set(user);
+
+    res.json({ 
+      success: true, 
+      data: user 
+    });
+  } catch (error) {
+    console.error('Error creating user:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Failed to create user profile' 
+    });
+  }
+});
+
+// Add user search endpoint
+app.get('/api/users/search', async (req, res) => {
+  try {
+    const token = req.headers.authorization?.split('Bearer ')[1];
+    if (!token) {
+      return res.status(401).json({ 
+        success: false, 
+        error: 'No token provided' 
+      });
+    }
+
+    await getAuth().verifyIdToken(token);
+    const { query } = req.query;
+
+    if (typeof query !== 'string' || query.length < 1) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid search query'
+      });
+    }
+
+    const usersSnapshot = await db.collection('users')
+      .where('nickname', '>=', query)
+      .where('nickname', '<=', query + '\uf8ff')
+      .limit(10)
+      .get();
+
+    const users = usersSnapshot.docs.map(doc => ({
+      ...doc.data(),
+      uid: doc.id
+    }));
+
+    res.json({ 
+      success: true, 
+      data: users 
+    });
+  } catch (error) {
+    console.error('Error searching users:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Failed to search users' 
+    });
+  }
 });
