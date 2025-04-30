@@ -1,4 +1,4 @@
-import io from "socket.io-client";
+import io, { Socket } from "socket.io-client";
 import { getAuth } from "firebase/auth";
 
 interface Message {
@@ -60,7 +60,7 @@ interface ClientToServerEvents {
 }
 
 class ChatService {
-  private socket: ReturnType<typeof io>;
+  private socket: typeof Socket;
   private messageQueue: { conversationId: string; text: string }[] = [];
   private messageHandlers: ((message: Message) => void)[] = [];
   private isInitialized = false;
@@ -74,9 +74,13 @@ class ChatService {
       auth: {
         token: localStorage.getItem("token") || "",
       },
-      // Remove the incorrect transportOptions structure
-      extraHeaders: {
-        "Access-Control-Allow-Credentials": "true"
+      // Removed the incorrect extraHeaders property
+      transportOptions: {
+        polling: {
+          extraHeaders: {
+            "Access-Control-Allow-Credentials": "true"
+          }
+        }
       },
       transports: ["websocket", "polling"]
     });
@@ -136,7 +140,8 @@ class ChatService {
   // Add a method to update the token and reconnect
   updateToken(token: string) {
     localStorage.setItem("token", token);
-    this.socket.auth = { token };
+    // Fix the auth property access
+    (this.socket as any).auth = { token };
 
     if (this.socket.disconnected) {
       this.socket.connect();
@@ -162,7 +167,8 @@ class ChatService {
         .getIdToken(true)
         .then((token) => {
           localStorage.setItem("token", token);
-          this.socket.auth = { token };
+          // Fix the auth property access
+          (this.socket as any).auth = { token };
           this.socket.connect();
         })
         .catch((error) => {
