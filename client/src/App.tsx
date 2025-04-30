@@ -6,12 +6,15 @@ import {
   completeEmailVerification,
   isEmailVerificationLink,
   signInWithGoogle,
+  signUpWithEmail,
+  auth,
+  db,
 } from "./services/auth";
 import { updateUserProfile } from "./services/profile";
-import { ChatPage } from "./components/ChatPage";
-// Import ToastContainer and CSS
-import { ToastContainer } from 'react-toastify';
+import ChatPage from "./components/ChatPage";
+import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
+import { doc, setDoc, getDoc } from "firebase/firestore";
 
 interface AuthPageProps {
   onAuthSuccess: (method: string, value: string) => void;
@@ -19,43 +22,39 @@ interface AuthPageProps {
 }
 
 function AuthPage({ onAuthSuccess, setPage }: AuthPageProps) {
-  const [mode, setMode] = useState<"phone" | "email">("phone");
+  const [mode, setMode] = useState<"phone" | "email" | "emailPassword">("phone");
   const [value, setValue] = useState("");
+  const [password, setPassword] = useState("");
   const [countryCode] = useState("+998");
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
 
-  // Handle phone number input
   const handlePhoneInput = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const input = e.target.value.replace(/\D/g, ""); // Remove non-digits
+    const input = e.target.value.replace(/\D/g, "");
     if (input.length <= 9) {
-      // Format: (XX) XXX-XX-XX
       let formatted = input;
       if (input.length > 2) {
         formatted = `(${input.slice(0, 2)}) ${input.slice(2)}`;
       }
       if (input.length > 5) {
-        formatted = `(${input.slice(0, 2)}) ${input.slice(2, 5)}-${input.slice(
-          5
-        )}`;
+        formatted = `(${input.slice(0, 2)}) ${input.slice(2, 5)}-${input.slice(5)}`;
       }
       if (input.length > 7) {
-        formatted = `(${input.slice(0, 2)}) ${input.slice(2, 5)}-${input.slice(
-          5,
-          7
-        )}-${input.slice(7)}`;
+        formatted = `(${input.slice(0, 2)}) ${input.slice(2, 5)}-${input.slice(5, 7)}-${input.slice(7)}`;
       }
       setValue(formatted);
     }
   };
 
-  // Handle email input
   const handleEmailInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     setValue(e.target.value);
   };
 
-  // Close dropdown when clicking outside
+  const handlePasswordInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setPassword(e.target.value);
+  };
+
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       const target = event.target as HTMLElement;
@@ -63,60 +62,55 @@ function AuthPage({ onAuthSuccess, setPage }: AuthPageProps) {
         setIsDropdownOpen(false);
       }
     };
-
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (value) {
-      setIsLoading(true);
-      setError("");
+    if (!value) return;
+    setIsLoading(true);
+    setError("");
 
-      try {
-        if (mode === "phone") {
-          const phoneNumber = `${countryCode}${value.replace(/\D/g, "")}`;
-          const confirmationResult = await sendPhoneVerification(phoneNumber);
-          onAuthSuccess(mode, value);
-          // Store confirmation result for verification page
-          sessionStorage.setItem(
-            "confirmationResult",
-            JSON.stringify(confirmationResult)
-          );
-        } else {
-          await sendEmailVerification(value);
-          onAuthSuccess(mode, value);
-        }
-      } catch (error) {
-        console.error("Authentication error:", error);
-        setError(
-          mode === "phone"
-            ? "Failed to send verification code. Please try again."
-            : "Failed to send verification email. Please try again."
-        );
-      } finally {
-        setIsLoading(false);
+    try {
+      if (mode === "phone") {
+        const phoneNumber = `${countryCode}${value.replace(/\D/g, "")}`;
+        const confirmationResult = await sendPhoneVerification(phoneNumber);
+        onAuthSuccess(mode, phoneNumber);
+        sessionStorage.setItem("confirmationResult", JSON.stringify(confirmationResult));
+      } else if (mode === "email") {
+        await sendEmailVerification(value);
+        onAuthSuccess(mode, value);
+      } else if (mode === "emailPassword") {
+        const user = await signUpWithEmail(value, password);
+        setPage("profile");
       }
+    } catch (error) {
+      console.error("Authentication error:", error);
+      setError(
+        mode === "phone"
+          ? "Failed to send verification code. Please try again."
+          : mode === "email"
+          ? "Failed to send verification email. Please try again."
+          : "Failed to sign up with email and password. Please try again."
+      );
+    } finally {
+      setIsLoading(false);
     }
   };
 
   const handleGoogleSignIn = async () => {
     try {
-      const user = await signInWithGoogle();
-      if (user) {
-        // Skip verification for Google sign-in
-        setPage("profile");
-      }
+      await signInWithGoogle();
+      setPage("profile");
     } catch (error) {
       console.error("Google sign-in error:", error);
-      // TODO: Show error to user
+      setError("Failed to sign in with Google. Please try again.");
     }
   };
 
   return (
     <div className="fixed inset-0 flex items-center justify-center bg-zinc-950">
-      {/* Animated background blobs */}
       <div className="fixed -top-[20%] -left-[20%] w-[70%] h-[70%] bg-gradient-to-br from-orange-600 via-rose-500 to-purple-600 opacity-30 rounded-full blur-3xl animate-spin-slow pointer-events-none" />
       <div className="fixed -bottom-[20%] -right-[20%] w-[70%] h-[70%] bg-gradient-to-tr from-purple-600 via-rose-500 to-orange-400 opacity-20 rounded-full blur-3xl animate-pulse-slow pointer-events-none" />
       <div className="relative w-full max-h-screen flex items-center justify-center px-4 py-8 z-10">
@@ -147,11 +141,19 @@ function AuthPage({ onAuthSuccess, setPage }: AuthPageProps) {
             >
               Email
             </button>
+            <button
+              className={`px-6 py-2 rounded-full font-semibold transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-orange-400 focus:ring-offset-2 focus:ring-offset-zinc-900 shadow-md text-lg md:text-xl ${
+                mode === "emailPassword"
+                  ? "bg-gradient-to-r from-orange-500 to-rose-500 text-white scale-105 shadow-lg"
+                  : "bg-zinc-800 text-gray-300 hover:bg-zinc-700 hover:scale-105"
+              } animate-pop`}
+              onClick={() => setMode("emailPassword")}
+              type="button"
+            >
+              Email/Password
+            </button>
           </div>
-          <form
-            onSubmit={handleSubmit}
-            className="flex flex-col gap-5 animate-fade-in"
-          >
+          <form onSubmit={handleSubmit} className="flex flex-col gap-5 animate-fade-in">
             {error && (
               <div className="bg-rose-500/10 text-rose-500 p-3 rounded-lg text-sm animate-fade-in">
                 {error}
@@ -180,14 +182,26 @@ function AuthPage({ onAuthSuccess, setPage }: AuthPageProps) {
                 />
               </div>
             ) : (
-              <input
-                type="email"
-                placeholder="Email address"
-                className="px-4 py-3 rounded-xl bg-zinc-800 border border-zinc-700 focus:outline-none focus:ring-2 focus:ring-orange-500/50 text-lg transition-all duration-300 shadow-inner hover:border-orange-400/30"
-                value={value}
-                onChange={handleEmailInput}
-                required
-              />
+              <>
+                <input
+                  type="email"
+                  placeholder="Email address"
+                  className="px-4 py-3 rounded-xl bg-zinc-800 border border-zinc-700 focus:outline-none focus:ring-2 focus:ring-orange-500/50 text-lg transition-all duration-300 shadow-inner hover:border-orange-400/30"
+                  value={value}
+                  onChange={handleEmailInput}
+                  required
+                />
+                {mode === "emailPassword" && (
+                  <input
+                    type="password"
+                    placeholder="Password"
+                    className="px-4 py-3 rounded-xl bg-zinc-800 border border-zinc-700 focus:outline-none focus:ring-2 focus:ring-orange-500/50 text-lg transition-all duration-300 shadow-inner hover:border-orange-400/30"
+                    value={password}
+                    onChange={handlePasswordInput}
+                    required
+                  />
+                )}
+              </>
             )}
             <button
               type="submit"
@@ -230,28 +244,11 @@ function AuthPage({ onAuthSuccess, setPage }: AuthPageProps) {
             onClick={handleGoogleSignIn}
             className="w-full flex items-center justify-center gap-2 bg-white text-zinc-900 font-semibold py-3 rounded-xl hover:bg-zinc-100 transition-all duration-300 shadow-lg hover:scale-105 focus:outline-none focus:ring-2 focus:ring-orange-400 focus:ring-offset-2 focus:ring-offset-zinc-900 animate-pop"
           >
-            <svg
-              width="20"
-              height="20"
-              fill="currentColor"
-              className="inline-block"
-            >
-              <path
-                d="M19.6 10.23c0-.68-.06-1.36-.17-2H10v3.77h5.5a4.7 4.7 0 0 1-2.04 3.08v2.56h3.3c1.93-1.78 3.04-4.4 3.04-7.41z"
-                fill="#4285F4"
-              />
-              <path
-                d="M10 20c2.7 0 4.97-.9 6.63-2.44l-3.3-2.56c-.92.62-2.1.99-3.33.99-2.56 0-4.73-1.73-5.5-4.07H1.1v2.56A9.99 9.99 0 0 0 10 20z"
-                fill="#34A853"
-              />
-              <path
-                d="M4.5 12.92A5.98 5.98 0 0 1 4.1 10c0-.99.18-1.95.4-2.92V4.52H1.1A9.99 9.99 0 0 0 0 10c0 1.64.39 3.19 1.1 4.52l3.4-2.56z"
-                fill="#FBBC05"
-              />
-              <path
-                d="M10 3.96c1.47 0 2.8.51 3.84 1.5l2.88-2.88C14.97 1.1 12.7 0 10 0A9.99 9.99 0 0 0 1.1 4.52l3.4 2.56C5.27 5.69 7.44 3.96 10 3.96z"
-                fill="#EA4335"
-              />
+            <svg width="20" height="20" fill="currentColor" className="inline-block">
+              <path d="M19.6 10.23c0-.68-.06-1.36-.17-2H10v3.77h5.5a4.7 4.7 0 0 1-2.04 3.08v2.56h3.3c1.93-1.78 3.04-4.4 3.04-7.41z" fill="#4285F4" />
+              <path d="M10 20c2.7 0 4.97-.9 6.63-2.44l-3.3-2.56c-.92.62-2.1.99-3.33.99-2.56 0-4.73-1.73-5.5-4.07H1.1v2.56A9.99 9.99 0 0 0 10 20z" fill="#34A853" />
+              <path d="M4.5 12.92A5.98 5.98 0 0 1 4.1 10c0-.99.18-1.95.4-2.92V4.52H1.1A9.99 9.99 0 0 0 0 10c0 1.64.39 3.19 1.1 4.52l3.4-2.56z" fill="#FBBC05" />
+              <path d="M10 3.96c1.47 0 2.8.51 3.84 1.5l2.88-2.88C14.97 1.1 12.7 0 10 0A9.99 9.99 0 0 0 1.1 4.52l3.4 2.56C5.27 5.69 7.44 3.96 10 3.96z" fill="#EA4335" />
             </svg>
             Continue with Google
           </button>
@@ -268,18 +265,13 @@ interface VerificationPageProps {
   onVerifySuccess: () => void;
 }
 
-function VerificationPage({
-  authMethod,
-  authValue,
-  onVerifySuccess,
-}: VerificationPageProps) {
+function VerificationPage({ authMethod, authValue, onVerifySuccess }: VerificationPageProps) {
   const [verificationCode, setVerificationCode] = useState("");
   const [isResending, setIsResending] = useState(false);
   const [timeLeft, setTimeLeft] = useState(60);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    // Check if current URL is an email verification link
     if (authMethod === "email" && window.location.href) {
       const email = window.localStorage.getItem("emailForSignIn");
       if (email && isEmailVerificationLink(window.location.href)) {
@@ -309,11 +301,29 @@ function VerificationPage({
 
     try {
       if (authMethod === "phone") {
-        const confirmationResult = JSON.parse(
-          sessionStorage.getItem("confirmationResult") || ""
-        );
+        const confirmationResult = JSON.parse(sessionStorage.getItem("confirmationResult") || "");
         if (confirmationResult) {
-          await confirmationResult.confirm(verificationCode);
+          const userCredential = await confirmationResult.confirm(verificationCode);
+          const user = userCredential.user;
+          const userDocRef = doc(db, 'users', user.uid);
+          const userDoc = await getDoc(userDocRef);
+          if (!userDoc.exists()) {
+            await setDoc(userDocRef, {
+              uid: user.uid,
+              email: user.email || '',
+              phoneNumber: authValue,
+              nickname: '',
+              displayName: '',
+              photoURL: '',
+              createdAt: Date.now(),
+              updatedAt: Date.now(),
+            });
+          }
+          const token = await user.getIdToken();
+          localStorage.setItem("token", token);
+          if (window.chatService) {
+            window.chatService.updateToken(token);
+          }
           onVerifySuccess();
         }
       }
@@ -330,10 +340,7 @@ function VerificationPage({
     try {
       if (authMethod === "phone") {
         const confirmationResult = await sendPhoneVerification(authValue);
-        sessionStorage.setItem(
-          "confirmationResult",
-          JSON.stringify(confirmationResult)
-        );
+        sessionStorage.setItem("confirmationResult", JSON.stringify(confirmationResult));
       } else {
         await sendEmailVerification(authValue);
       }
@@ -348,7 +355,6 @@ function VerificationPage({
 
   return (
     <div className="fixed inset-0 flex items-center justify-center bg-zinc-950">
-      {/* Animated background blobs */}
       <div className="fixed -top-[20%] -left-[20%] w-[70%] h-[70%] bg-gradient-to-br from-orange-600 via-rose-500 to-purple-600 opacity-30 rounded-full blur-3xl animate-spin-slow pointer-events-none" />
       <div className="fixed -bottom-[20%] -right-[20%] w-[70%] h-[70%] bg-gradient-to-tr from-purple-600 via-rose-500 to-orange-400 opacity-20 rounded-full blur-3xl animate-pulse-slow pointer-events-none" />
       <div className="relative w-full max-h-screen flex items-center justify-center px-4 py-8 z-10">
@@ -357,7 +363,6 @@ function VerificationPage({
             Verify your {authMethod}
           </h2>
           <p className="text-gray-400 text-center mb-8">{authValue}</p>
-
           {authMethod === "email" ? (
             <div className="text-center space-y-4">
               <div className="bg-zinc-800/50 rounded-lg p-4">
@@ -399,8 +404,7 @@ function VerificationPage({
                         const nextInput = e.target as HTMLInputElement;
                         if (
                           index < 5 &&
-                          nextInput.nextElementSibling instanceof
-                            HTMLInputElement
+                          nextInput.nextElementSibling instanceof HTMLInputElement
                         ) {
                           nextInput.nextElementSibling.focus();
                         }
@@ -422,7 +426,6 @@ function VerificationPage({
                   />
                 ))}
               </div>
-
               <button
                 type="submit"
                 className="w-full bg-gradient-to-r from-orange-500 to-rose-500 hover:from-orange-400 hover:to-rose-400 text-white font-bold py-3 rounded-xl transition-all duration-300 shadow-lg hover:scale-105 focus:outline-none focus:ring-2 focus:ring-orange-400 focus:ring-offset-2 focus:ring-offset-zinc-900 relative overflow-hidden group"
@@ -433,7 +436,6 @@ function VerificationPage({
               </button>
             </form>
           )}
-
           <div className="mt-6 text-center">
             <button
               onClick={handleResendCode}
@@ -489,22 +491,17 @@ function ProfilePage({ setPage }: ProfilePageProps) {
       setError("Please enter a display name");
       return;
     }
-
     if (!nickname.trim()) {
       setError("Please enter a nickname");
       return;
     }
-
-    // Validate nickname format
     const nicknameRegex = /^[a-z0-9._]+$/;
     if (!nicknameRegex.test(nickname)) {
       setError("Nickname can only contain lowercase letters, numbers, underscore (_) and period (.)");
       return;
     }
-
     setIsLoading(true);
     setError("");
-
     try {
       await updateUserProfile(displayName.trim(), nickname.trim(), photoFile || undefined);
       setPage("main");
@@ -518,16 +515,13 @@ function ProfilePage({ setPage }: ProfilePageProps) {
 
   return (
     <div className="fixed inset-0 flex items-center justify-center bg-zinc-950">
-      {/* Animated background blobs */}
       <div className="fixed -top-[20%] -left-[20%] w-[70%] h-[70%] bg-gradient-to-br from-orange-600 via-rose-500 to-purple-600 opacity-30 rounded-full blur-3xl animate-spin-slow pointer-events-none" />
       <div className="fixed -bottom-[20%] -right-[20%] w-[70%] h-[70%] bg-gradient-to-tr from-purple-600 via-rose-500 to-orange-400 opacity-20 rounded-full blur-3xl animate-pulse-slow pointer-events-none" />
-
       <div className="relative w-full max-h-screen flex items-center justify-center px-4 py-8 z-10">
         <div className="bg-zinc-900/90 rounded-3xl shadow-2xl p-6 sm:p-8 w-full max-w-md animate-fade-in backdrop-blur-md border border-orange-900/30">
           <h2 className="text-3xl font-bold mb-6 text-center bg-gradient-to-r from-orange-400 via-rose-300 to-purple-400 bg-clip-text text-transparent">
             Set up your profile
           </h2>
-
           <form onSubmit={handleSubmit} className="space-y-6">
             <div className="flex flex-col items-center gap-4">
               <div
@@ -572,7 +566,6 @@ function ProfilePage({ setPage }: ProfilePageProps) {
                 Click to upload profile picture
               </div>
             </div>
-
             <div className="space-y-2">
               <label
                 htmlFor="nickname"
@@ -593,7 +586,6 @@ function ProfilePage({ setPage }: ProfilePageProps) {
                 Can contain lowercase letters, numbers, underscore (_) and period (.)
               </p>
             </div>
-
             <div className="space-y-2">
               <label
                 htmlFor="displayName"
@@ -611,13 +603,11 @@ function ProfilePage({ setPage }: ProfilePageProps) {
                 required
               />
             </div>
-
             {error && (
               <div className="bg-rose-500/10 text-rose-500 p-3 rounded-lg text-sm animate-fade-in">
                 {error}
               </div>
             )}
-
             <button
               type="submit"
               disabled={isLoading || !displayName.trim()}
@@ -657,9 +647,7 @@ function ProfilePage({ setPage }: ProfilePageProps) {
 }
 
 function App() {
-  const [page, setPage] = useState<"auth" | "verify" | "profile" | "main">(
-    "auth"
-  );
+  const [page, setPage] = useState<"auth" | "verify" | "profile" | "main">("auth");
   const [authMethod, setAuthMethod] = useState<string>("");
   const [authValue, setAuthValue] = useState<string>("");
 
@@ -685,9 +673,8 @@ function App() {
         pauseOnFocusLoss
         draggable
         pauseOnHover
-        theme="dark" // Using dark theme to match your app's styling
+        theme="dark"
       />
-      
       {page === "auth" ? (
         <AuthPage onAuthSuccess={handleAuthSuccess} setPage={setPage} />
       ) : page === "verify" ? (
@@ -699,11 +686,10 @@ function App() {
       ) : page === "profile" ? (
         <ProfilePage setPage={setPage} />
       ) : page === "main" ? (
-        <ChatPage />
+        <ChatPage setPage={setPage} /> // Added setPage prop
       ) : null}
     </>
   );
 }
-
 
 export default App;

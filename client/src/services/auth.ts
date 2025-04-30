@@ -8,7 +8,9 @@ import {
   sendSignInLinkToEmail,
   isSignInWithEmailLink,
   signInWithEmailLink,
+  createUserWithEmailAndPassword,
 } from "firebase/auth";
+import { getFirestore, doc, setDoc, getDoc } from "firebase/firestore";
 
 // Your web app's Firebase configuration
 const firebaseConfig = {
@@ -23,6 +25,7 @@ const firebaseConfig = {
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
+const db = getFirestore(app);
 const googleProvider = new GoogleAuthProvider();
 
 // Initialize reCAPTCHA verifier
@@ -37,15 +40,46 @@ export const initRecaptcha = () => {
   return recaptchaVerifier;
 };
 
+// Helper function to create a user document if it doesn't exist
+const createUserDocument = async (user: any) => {
+  const userDocRef = doc(db, 'users', user.uid);
+  const userDoc = await getDoc(userDocRef);
+  if (!userDoc.exists()) {
+    await setDoc(userDocRef, {
+      uid: user.uid,
+      email: user.email || '',
+      nickname: '', // Placeholder, updated in ProfilePage
+      displayName: user.displayName || '',
+      photoURL: user.photoURL || '',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+  }
+};
+
+// Email/Password Signup
+export const signUpWithEmail = async (email: string, password: string) => {
+  try {
+    const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+    const user = userCredential.user;
+    await createUserDocument(user);
+    const token = await user.getIdToken();
+    localStorage.setItem("token", token);
+    if (window.chatService) {
+      window.chatService.updateToken(token);
+    }
+    return user;
+  } catch (error) {
+    console.error("Error signing up with email:", error);
+    throw error;
+  }
+};
+
 // Phone authentication
 export const sendPhoneVerification = async (phoneNumber: string) => {
   try {
     const verifier = initRecaptcha();
-    const confirmationResult = await signInWithPhoneNumber(
-      auth,
-      phoneNumber,
-      verifier
-    );
+    const confirmationResult = await signInWithPhoneNumber(auth, phoneNumber, verifier);
     return confirmationResult;
   } catch (error) {
     console.error("Error sending code:", error);
@@ -57,18 +91,11 @@ export const sendPhoneVerification = async (phoneNumber: string) => {
 export const sendEmailVerification = async (email: string) => {
   try {
     const actionCodeSettings = {
-      // The URL to redirect to after email verification
       url: window.location.origin,
-      // This must be true for email link sign-in
       handleCodeInApp: true,
     };
-
-    // Send sign-in link to email
     await sendSignInLinkToEmail(auth, email, actionCodeSettings);
-
-    // Save the email in localStorage to complete sign-in
     window.localStorage.setItem("emailForSignIn", email);
-
     return true;
   } catch (error) {
     console.error("Error in email verification:", error);
@@ -86,7 +113,14 @@ export const completeEmailVerification = async (email: string, url: string) => {
   try {
     if (isSignInWithEmailLink(auth, url)) {
       const result = await signInWithEmailLink(auth, email, url);
-      return result.user;
+      const user = result.user;
+      await createUserDocument(user);
+      const token = await user.getIdToken();
+      localStorage.setItem("token", token);
+      if (window.chatService) {
+        window.chatService.updateToken(token);
+      }
+      return user;
     }
     throw new Error("Invalid verification link");
   } catch (error) {
@@ -99,18 +133,18 @@ export const completeEmailVerification = async (email: string, url: string) => {
 export const signInWithGoogle = async () => {
   try {
     const result = await signInWithPopup(auth, googleProvider);
-    // After successful authentication
     const user = result.user;
+    await createUserDocument(user);
     const token = await user.getIdToken();
     localStorage.setItem("token", token);
-    
-    // Also update the chat service if it exists
     if (window.chatService) {
       window.chatService.updateToken(token);
     }
-    return result.user;
+    return user;
   } catch (error) {
     console.error("Error signing in with Google:", error);
     throw error;
   }
 };
+
+export { auth, db };
