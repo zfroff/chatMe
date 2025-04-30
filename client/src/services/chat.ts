@@ -74,14 +74,11 @@ class ChatService {
       auth: {
         token: localStorage.getItem("token") || "",
       },
-      transportOptions: {
-        polling: {
-          extraHeaders: {
-            "Access-Control-Allow-Credentials": "true",
-          },
-          transports: ["websocket", "polling"],
-        },
+      // Remove the incorrect transportOptions structure
+      extraHeaders: {
+        "Access-Control-Allow-Credentials": "true"
       },
+      transports: ["websocket", "polling"]
     });
 
     // Setup event listeners
@@ -139,7 +136,7 @@ class ChatService {
   // Add a method to update the token and reconnect
   updateToken(token: string) {
     localStorage.setItem("token", token);
-    (this.socket as any).auth = { token };
+    this.socket.auth = { token };
 
     if (this.socket.disconnected) {
       this.socket.connect();
@@ -165,7 +162,7 @@ class ChatService {
         .getIdToken(true)
         .then((token) => {
           localStorage.setItem("token", token);
-          (this.socket as any).auth = { token };
+          this.socket.auth = { token };
           this.socket.connect();
         })
         .catch((error) => {
