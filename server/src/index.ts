@@ -20,7 +20,7 @@ initializeApp({
 
 const app = express();
 const httpServer = createServer(app);
-const io = new Server(httpServer, {
+let io = new Server(httpServer, {
   cors: {
     origin: ["http://localhost:5173", "http://localhost:3000"], // Allow both client and server origins
     methods: ["GET", "POST"],
@@ -29,6 +29,13 @@ const io = new Server(httpServer, {
   },
   allowEIO3: true, // Enable Engine.IO v3 compatibility
   pingTimeout: 60000, // Increase ping timeout
+  transports: ['websocket', 'polling'], // Add this line
+  cookie: {
+    name: "io",
+    path: "/",
+    httpOnly: true,
+    sameSite: "lax"
+  }
 });
 
 // Update the general CORS middleware as well
@@ -218,10 +225,21 @@ app.use(
   cors({
     origin: ["http://localhost:5173", "http://localhost:3000"],
     credentials: true,
-    methods: ["GET", "POST", "OPTIONS"],
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
+
+// Update Socket.IO CORS configuration
+io = new Server(httpServer, {
+  cors: {
+    origin: ["http://localhost:5173", "http://localhost:3000"],
+    methods: ["GET", "POST"],
+    credentials: true,
+    allowedHeaders: ["Authorization", "Content-Type"],
+  },
+  transports: ['websocket', 'polling'],
+});
 
 // Make sure your check-nickname endpoint has proper error handling
 app.post("/api/check-nickname", async (req, res) => {
@@ -248,7 +266,7 @@ app.post("/api/check-nickname", async (req, res) => {
       // If we get here, the query was successful
       return res.json({ success: snapshot.empty });
     } catch (error) {
-      if (error.code === 5) {
+      if ((error as { code: number }).code === 5) {
         // Collection doesn't exist yet, which means no users, so nickname is available
         return res.json({ success: true });
       }
@@ -265,18 +283,27 @@ app.post("/api/update-profile", async (req, res) => {
   try {
     const token = req.headers.authorization?.split("Bearer ")[1];
     if (!token) {
-      return res
-        .status(401)
-        .json({ success: false, error: "No token provided" });
+      return res.status(401).json({ success: false, error: "No token provided" });
     }
 
     const decodedToken = await getAuth().verifyIdToken(token);
     const { nickname, displayName, photoURL } = req.body;
 
+    // Validate required fields
+    if (!nickname || !displayName) {
+      return res.status(400).json({ 
+        success: false, 
+        error: "Nickname and display name are required" 
+      });
+    }
+
     // Check nickname format
     const nicknameRegex = /^[a-z0-9._]+$/;
     if (!nicknameRegex.test(nickname)) {
-      return res.json({ success: false, error: "Invalid nickname format" });
+      return res.status(400).json({ 
+        success: false, 
+        error: "Invalid nickname format" 
+      });
     }
 
     // Check if nickname is taken by another user
@@ -306,7 +333,18 @@ app.post("/api/update-profile", async (req, res) => {
     return res.json({ success: true });
   } catch (error) {
     console.error("Error updating profile:", error);
-    return res.status(500).json({ success: false, error: "Server error" });
+    // More specific error handling
+    if ((error as {code: string}).code === 'auth/invalid-token') {
+      return res.status(401).json({ 
+        success: false, 
+        error: "Invalid authentication token" 
+      });
+    }
+    return res.status(500).json({ 
+      success: false, 
+      error: "Server error", 
+      details: (error as Error).message
+    });
   }
 });
 

@@ -99,6 +99,15 @@ export const completeEmailVerification = async (email: string, url: string) => {
 export const signInWithGoogle = async () => {
   try {
     const result = await signInWithPopup(auth, googleProvider);
+    // After successful authentication
+    const user = result.user;
+    const token = await user.getIdToken();
+    localStorage.setItem("token", token);
+    
+    // Also update the chat service if it exists
+    if (window.chatService) {
+      window.chatService.updateToken(token);
+    }
     return result.user;
   } catch (error) {
     console.error("Error signing in with Google:", error);

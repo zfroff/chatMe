@@ -1,4 +1,5 @@
 import io from "socket.io-client";
+import { getAuth } from "firebase/auth";
 
 interface Message {
   id: string;
@@ -59,27 +60,123 @@ interface ClientToServerEvents {
 }
 
 class ChatService {
-  // Use any for socket type to avoid TypeScript errors with mismatched versions
-  private socket: any;
+  private socket: ReturnType<typeof io>;
   private messageQueue: { conversationId: string; text: string }[] = [];
+  private messageHandlers: ((message: Message) => void)[] = [];
+  private isInitialized = false;
 
   constructor() {
-    // Create the socket directly using io instead of Manager
     this.socket = io(import.meta.env.VITE_API_URL || "http://localhost:3000", {
       autoConnect: false,
       reconnection: true,
-      reconnectionAttempts: 10,
+      reconnectionAttempts: 5,
       reconnectionDelay: 1000,
-      reconnectionDelayMax: 5000,
-      timeout: 20000,
-      forceNew: true,
-      transports: ['polling', 'websocket'], // Try polling first, then websocket
       auth: {
         token: localStorage.getItem("token") || "",
       },
+      transportOptions: {
+        polling: {
+          extraHeaders: {
+            "Access-Control-Allow-Credentials": "true",
+          },
+          transports: ["websocket", "polling"],
+        },
+      },
     });
 
-    this.initializeSocket();
+    // Setup event listeners
+    this.socket.on("connect", this.handleConnect.bind(this));
+    this.socket.on("disconnect", this.handleDisconnect.bind(this));
+    this.socket.on("connect_error", this.handleError.bind(this));
+    this.socket.on("new_message", this.handleNewMessage.bind(this));
+
+    // Auto-connect when service is instantiated
+    this.connect();
+  }
+
+  private handleConnect() {
+    console.log("Connected to chat server");
+    // Process any queued messages when connection is established
+    this.processMessageQueue();
+  }
+
+  private handleDisconnect(reason: string) {
+    console.log(`Disconnected: ${reason}`);
+    // If the server disconnected us, try to reconnect
+    if (reason === "io server disconnect") {
+      this.socket.connect();
+    }
+  }
+
+  private handleError(error: Error) {
+    console.error("Connection error:", error);
+    // If the error is about authentication, try to refresh the token
+    if (error.message.includes("Authentication")) {
+      this.refreshToken();
+    }
+  }
+
+  private handleNewMessage(message: Message) {
+    // Notify all registered handlers
+    this.messageHandlers.forEach((handler) => handler(message));
+  }
+
+  // Add method to refresh token
+  private refreshToken() {
+    const auth = getAuth();
+    if (auth.currentUser) {
+      auth.currentUser
+        .getIdToken(true)
+        .then((token) => {
+          this.updateToken(token);
+        })
+        .catch((error) => {
+          console.error("Failed to refresh token:", error);
+        });
+    }
+  }
+
+  // Add a method to update the token and reconnect
+  updateToken(token: string) {
+    localStorage.setItem("token", token);
+    (this.socket as any).auth = { token };
+
+    if (this.socket.disconnected) {
+      this.socket.connect();
+    }
+  }
+
+  // Update your connect method
+  connect() {
+    if (this.isInitialized) {
+      // If already initialized, just reconnect if needed
+      if (!this.socket.connected) {
+        this.socket.connect();
+      }
+      return;
+    }
+
+    this.isInitialized = true;
+
+    // Get a fresh token before connecting
+    const auth = getAuth();
+    if (auth.currentUser) {
+      auth.currentUser
+        .getIdToken(true)
+        .then((token) => {
+          localStorage.setItem("token", token);
+          (this.socket as any).auth = { token };
+          this.socket.connect();
+        })
+        .catch((error) => {
+          console.error("Failed to get token:", error);
+          // Try to connect anyway
+          this.socket.connect();
+        });
+    } else {
+      console.log("No authenticated user, connecting without token");
+      this.socket.connect();
+    }
   }
 
   public sendMessage(
@@ -157,50 +254,11 @@ class ChatService {
     }
   }
 
-  private initializeSocket() {
-    this.socket.connect();
-
-    this.socket.on("connect", () => {
-      console.log("Connected to chat server");
-      // Process any queued messages when connection is established
-      this.processMessageQueue();
-    });
-
-    this.socket.on("connect_error", (error: Error) => {
-      console.error("Connection error:", error);
-      // Implement exponential backoff by using the built-in socket.io reconnection
-    });
-
-    this.socket.on("disconnect", (reason: string) => {
-      console.log(`Disconnected: ${reason}`);
-
-      // If the server disconnected us, try to reconnect
-      if (reason === "io server disconnect") {
-        this.socket.connect();
-      }
-      // For all other cases, socket.io will automatically try to reconnect
-    });
-
-    this.socket.on("reconnect", (attemptNumber: number) => {
-      console.log(`Reconnected after ${attemptNumber} attempts`);
-    });
-
-    this.socket.on("reconnect_error", (error: Error) => {
-      console.error("Reconnection error:", error);
-    });
-
-    this.socket.on("reconnect_failed", () => {
-      console.error(
-        "Failed to reconnect to chat server after maximum attempts"
-      );
-      // You could notify the user here that they need to refresh the page
-    });
-  }
-
   public startConversation(participantId: string): Promise<Conversation> {
     return new Promise((resolve, reject) => {
       if (!this.socket.connected) {
-        reject(new Error("Not connected to chat server"));
+        this.connect(); // Try to connect first
+        reject(new Error("Not connected to chat server. Please try again."));
         return;
       }
 
@@ -223,13 +281,20 @@ class ChatService {
   }
 
   public onNewMessage(callback: (message: Message) => void) {
-    this.socket.on("new_message", callback);
+    this.messageHandlers.push(callback);
+    return () => {
+      // Return a function to remove the handler
+      this.messageHandlers = this.messageHandlers.filter(
+        (handler) => handler !== callback
+      );
+    };
   }
 
   public getConversations(): Promise<Conversation[]> {
     return new Promise((resolve, reject) => {
       if (!this.socket.connected) {
-        reject(new Error("Not connected to chat server"));
+        this.connect(); // Try to connect first
+        reject(new Error("Not connected to chat server. Please try again."));
         return;
       }
 
@@ -253,7 +318,8 @@ class ChatService {
   public getMessages(conversationId: string): Promise<Message[]> {
     return new Promise((resolve, reject) => {
       if (!this.socket.connected) {
-        reject(new Error("Not connected to chat server"));
+        this.connect(); // Try to connect first
+        reject(new Error("Not connected to chat server. Please try again."));
         return;
       }
 
@@ -286,4 +352,7 @@ class ChatService {
   }
 }
 
-export const chatService = new ChatService();
+// Export as singleton
+const chatService = new ChatService();
+export default chatService;
+export { chatService };

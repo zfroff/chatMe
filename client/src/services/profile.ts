@@ -44,10 +44,21 @@ export const updateUserProfile = async (
   try {
     if (!auth.currentUser) throw new Error("No authenticated user");
 
-    // First check if nickname is available
-    const isNicknameAvailable = await checkNickname(nickname);
-    if (!isNicknameAvailable) {
-      throw new Error('Nickname is already taken');
+    // Get a fresh token
+    const token = await auth.currentUser.getIdToken(true);
+    
+    // First check if nickname is available (only if it's different from current)
+    const currentUser = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/api/user`, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+    }).then(res => res.json());
+    
+    if (currentUser.nickname !== nickname) {
+      const isNicknameAvailable = await checkNickname(nickname);
+      if (!isNicknameAvailable) {
+        throw new Error('Nickname is already taken');
+      }
     }
 
     let photoURL = auth.currentUser.photoURL;
@@ -56,7 +67,7 @@ export const updateUserProfile = async (
       photoURL = await uploadProfilePicture(photoFile);
     }
 
-    // Update profile
+    // Update profile in Firebase Auth
     await updateProfile(auth.currentUser, {
       displayName,
       photoURL,
@@ -67,18 +78,31 @@ export const updateUserProfile = async (
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${await auth.currentUser.getIdToken()}`,
+        'Authorization': `Bearer ${token}`,
       },
       body: JSON.stringify({
         nickname,
         displayName,
         photoURL,
       }),
+      credentials: 'include',
     });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || `Server error: ${response.status}`);
+    }
 
     const data = await response.json();
     if (!data.success) {
       throw new Error(data.error || 'Failed to update profile');
+    }
+
+    // Update the token in chat service to reflect profile changes
+    const chatService = window.chatService;
+    if (chatService) {
+      const newToken = await auth.currentUser.getIdToken(true);
+      chatService.updateToken(newToken);
     }
 
     return {
